@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="id" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#061e16">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Skor Billiard">
+    <title>Skor Billiard — Catatan Skor Live</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@700;800&display=swap" rel="stylesheet">
+
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <!-- MQTT over WebSockets untuk Real-time Sync di GitHub Pages & Semua HP -->
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #071712;
+            color: #f8fafc;
+            min-height: 100vh;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .touch-btn:active {
+            transform: scale(0.96);
+        }
+    </style>
+</head>
+<body class="pb-12 select-none">
+
+    <!-- 1. HEADER RINGKAS -->
+    <header class="sticky top-0 z-30 bg-[#071712]/95 backdrop-blur-md border-b border-emerald-800/50 px-4 py-3">
+        <div class="max-w-lg mx-auto flex items-center justify-between gap-2">
+            <!-- Judul Sederhana -->
+            <div class="flex items-center gap-2.5">
+                <div class="w-9 h-9 rounded-full bg-emerald-500 text-slate-950 font-black flex items-center justify-center text-base shadow">
+                    8
+                </div>
+                <div>
+                    <h1 class="font-bold text-base sm:text-lg text-white leading-tight">Skor Billiard</h1>
+                    <div class="flex items-center gap-1.5 mt-0.5">
+                        <span id="syncDot" class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+                        <span id="syncText" class="text-[11px] font-medium text-emerald-300/90">Menghubungkan...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Kontrol Kode Meja, Salin Link, & Install -->
+            <div class="flex items-center gap-1.5">
+                <button id="btnOpenRoomModal" class="touch-btn px-3 py-1.5 rounded-xl bg-emerald-950 hover:bg-emerald-900 border border-emerald-600/60 flex items-center gap-1.5 transition" title="Ganti Kode Meja">
+                    <span class="text-[10px] uppercase text-emerald-300/80 font-semibold">Meja:</span>
+                    <span id="badgeRoomCode" class="font-mono font-bold text-xs sm:text-sm text-amber-400">BEDDUL</span>
+                    <i class="fa-solid fa-pen text-[10px] text-emerald-400 ml-0.5"></i>
+                </button>
+
+                <button id="btnCopyRoom" class="touch-btn p-2 rounded-xl bg-emerald-950 hover:bg-emerald-900 border border-emerald-700/50 text-emerald-200 text-xs transition" title="Salin Link Meja">
+                    <i class="fa-solid fa-share-nodes"></i>
+                </button>
+
+                <button id="btnOpenInstallModal" class="touch-btn px-2.5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs flex items-center gap-1 transition" title="Install ke HP">
+                    <i class="fa-solid fa-mobile-screen-button"></i>
+                    <span class="hidden sm:inline">Install</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- KONTEN UTAMA -->
+    <main class="max-w-lg mx-auto px-4 pt-4 space-y-4">
+
+        <!-- 2. INPUT TAMBAH PEMAIN -->
+        <form id="formAddPlayer" class="flex gap-2">
+            <input
+                type="text"
+                id="inputPlayerName"
+                maxlength="30"
+                placeholder="Ketik nama pemain baru..."
+                class="flex-1 bg-emerald-950/70 border border-emerald-700/60 focus:border-emerald-400 rounded-2xl px-4 py-3 text-sm sm:text-base text-white placeholder-emerald-300/40 focus:outline-none transition"
+                required
+            >
+            <button type="submit" class="touch-btn px-5 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-sm sm:text-base flex items-center gap-1.5 shrink-0 shadow-lg transition">
+                <i class="fa-solid fa-plus"></i>
+                <span>Tambah</span>
+            </button>
+        </form>
+
+        <!-- 3. DAFTAR SKOR PEMAIN (FOKUS UTAMA - NAMA UTUH TIDAK TERPOTONG) -->
+        <section id="playersListContainer" class="space-y-3">
+            <!-- Diisi otomatis oleh JavaScript -->
+        </section>
+
+        <!-- 4. KONTROL BAWAH SEDERHANA -->
+        <section class="pt-2 flex items-center justify-between gap-2">
+            <button
+                type="button"
+                id="btnToggleSort"
+                class="touch-btn flex-1 py-2.5 px-3 rounded-xl bg-emerald-950/80 border border-emerald-700/50 text-emerald-200 text-xs font-semibold flex items-center justify-center gap-2 transition"
+            >
+                <i class="fa-solid fa-arrow-down-wide-short text-amber-400"></i>
+                <span id="sortStatusLabel">Urutkan Skor Tertinggi: ON</span>
+            </button>
+
+            <button
+                type="button"
+                id="btnResetAllScores"
+                class="touch-btn py-2.5 px-3.5 rounded-xl bg-rose-950/60 hover:bg-rose-900/60 border border-rose-700/40 text-rose-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition"
+            >
+                <i class="fa-solid fa-rotate-left"></i>
+                <span>Reset ke 0</span>
+            </button>
+        </section>
+
+        <!-- INFO RINGKAS SINKRONISASI & TOMBOL REFRESH SYNC -->
+        <footer class="pt-4 text-center space-y-2 text-[11px] text-emerald-300/60">
+            <div class="inline-flex items-center gap-2 bg-emerald-950/60 border border-emerald-800/50 rounded-full px-3.5 py-1.5">
+                <span id="footerSyncStatus" class="text-emerald-300 font-medium">Siap sinkronisasi antar HP</span>
+                <button id="btnForceSync" type="button" class="text-amber-400 hover:text-amber-300 font-bold underline ml-1">
+                    Refresh Sync
+                </button>
+            </div>
+            <p>Buka link atau kode <strong id="footerRoomLabel" class="text-amber-400 font-mono">BEDDUL</strong> yang sama di HP teman untuk melihat skor live.</p>
+            <p class="font-mono text-[10px] text-emerald-400/35 break-all">
+                ID Perangkat: <span id="footerUserId">Memuat...</span>
+            </p>
+        </footer>
+    </main>
+
+    <!-- MODAL GANTI KODE MEJA (REALTIME ANTAR HP) -->
+    <div id="modalRoom" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
+        <div class="bg-[#0b241c] border border-emerald-600/50 rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-2xl">
+            <div class="flex items-center justify-between">
+                <h3 class="font-bold text-base text-white">Kode Meja Live</h3>
+                <button id="btnCloseRoomModal" class="w-8 h-8 rounded-lg bg-emerald-900/60 text-emerald-200 flex items-center justify-center">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <p class="text-xs text-emerald-200/80 leading-relaxed">
+                Masukkan kode yang sama di HP teman agar daftar nama dan skor berubah secara <strong>real-time</strong> di semua HP.
+            </p>
+            <form id="formChangeRoom" class="space-y-3">
+                <input
+                    type="text"
+                    id="inputRoomCode"
+                    maxlength="15"
+                    placeholder="Contoh: MEJA-1"
+                    class="w-full bg-emerald-950 border border-emerald-600/60 rounded-xl px-3.5 py-2.5 font-mono font-bold uppercase text-amber-400 text-base text-center focus:outline-none focus:border-amber-400"
+                    required
+                >
+                <button type="submit" class="touch-btn w-full py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-sm">
+                    Buka / Gabung Meja
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL PANDUAN SINGKAT INSTALL KE HP -->
+    <div id="modalInstall" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
+        <div class="bg-[#0b241c] border border-emerald-600/50 rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-2xl">
+            <div class="flex items-center justify-between">
+                <h3 class="font-bold text-base text-white">Install Aplikasi ke HP</h3>
+                <button id="btnCloseInstallModal" class="w-8 h-8 rounded-lg bg-emerald-900/60 text-emerald-200 flex items-center justify-center">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <button id="btnNativeInstall" class="hidden touch-btn w-full py-2.5 rounded-xl bg-amber-400 text-slate-950 font-bold text-sm items-center justify-center gap-2">
+                <i class="fa-solid fa-download"></i>
+                <span>Install Sekarang</span>
+            </button>
+
+            <div class="space-y-2.5 text-xs text-emerald-100/90">
+                <div class="bg-emerald-950/80 border border-emerald-800/60 rounded-xl p-3">
+                    <div class="font-bold text-emerald-300 mb-1"><i class="fa-brands fa-android mr-1"></i> Android (Chrome)</div>
+                    <p>Ketuk ikon <strong>Titik Tiga (⋮)</strong> di pojok kanan atas browser, lalu pilih <strong>"Tambahkan ke layar utama"</strong> atau <strong>"Instal aplikasi"</strong>.</p>
+                </div>
+                <div class="bg-emerald-950/80 border border-emerald-800/60 rounded-xl p-3">
+                    <div class="font-bold text-amber-300 mb-1"><i class="fa-brands fa-apple mr-1"></i> iPhone (Safari)</div>
+                    <p>Ketuk tombol <strong>Share</strong> di bawah layar, lalu pilih <strong>"Tambah ke Layar Utama" (Add to Home Screen)</strong>.</p>
+                </div>
+            </div>
+
+            <button id="btnFullscreen" class="touch-btn w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center justify-center gap-1.5">
+                <i class="fa-solid fa-expand"></i>
+                <span>Aktifkan Mode Layar Penuh</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- MODAL KONFIRMASI SEDERHANA -->
+    <div id="modalConfirm" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
+        <div class="bg-[#0b241c] border border-emerald-600/50 rounded-2xl max-w-xs w-full p-5 space-y-4 shadow-2xl text-center">
+            <h4 id="confirmTitle" class="font-bold text-base text-white">Konfirmasi</h4>
+            <p id="confirmMessage" class="text-xs text-emerald-200/80">Apakah Anda yakin?</p>
+            <div class="flex gap-2 pt-1">
+                <button id="btnConfirmCancel" class="flex-1 py-2 rounded-xl bg-emerald-900/70 text-emerald-200 text-xs font-semibold">Batal</button>
+                <button id="btnConfirmOk" class="flex-1 py-2 rounded-xl bg-rose-600 text-white text-xs font-bold">Ya</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- NOTIFIKASI TOAST RINGKAS -->
+    <div id="toastContainer" class="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 pointer-events-none flex flex-col items-center gap-1.5 w-full max-w-xs px-4"></div>
+
+    <!-- SCRIPT FIREBASE & LOGIKA SKOR SEDERHANA -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Setup Manifest PWA agar bisa di-install ke layar utama HP
+        (function initManifest() {
+            const manifest = {
+                name: "Skor Billiard Live",
+                short_name: "Skor Billiard",
+                start_url: window.location.href,
+                display: "standalone",
+                background_color: "#071712",
+                theme_color: "#061e16"
+            };
+            const blob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+            const link = document.createElement('link');
+            link.rel = 'manifest';
+            link.href = URL.createObjectURL(blob);
+            document.head.appendChild(link);
+        })();
+
+        // State Aplikasi
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'cuemaster-billiard-live';
+        const isCanvasEnv = typeof __firebase_config !== 'undefined' && Boolean(__firebase_config);
+        const clientDeviceId = 'HP-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+        let db = null;
+        let auth = null;
+        let currentUser = null;
+        let unsubscribeRoom = null;
+
+        // MQTT Realtime State (Aktif otomatis di GitHub Pages / di luar Canvas)
+        let mqttClient = null;
+        let currentBrokerIndex = 0;
+        const MQTT_BROKERS = [
+            'wss://broker.emqx.io:8084/mqtt',
+            'wss://broker.hivemq.com:8884/mqtt',
+            'wss://test.mosquitto.org:8081/mqtt'
+        ];
+        const TOPIC_PREFIX = 'za1fan_billiard_live_v3';
+
+        let currentRoomCode = "BEDDUL";
+        let sortByHighest = true;
+
+        let roomData = {
+            roomCode: "BEDDUL",
+            updatedAt: 0,
+            players: [
+                { id: "p_1", name: "Andi", wins: 0, createdAt: 1 },
+                { id: "p_2", name: "Budi", wins: 0, createdAt: 2 }
+            ]
+        };
+
+        // Update indikator status koneksi di layar
+        function setConnectionStatus(state, detailText) {
+            const dot = document.getElementById('syncDot');
+            const text = document.getElementById('syncText');
+            const footerStatus = document.getElementById('footerSyncStatus');
+
+            if (state === 'connected') {
+                dot.className = "w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]";
+                text.textContent = "Terhubung Live";
+                text.className = "text-[11px] font-semibold text-emerald-300";
+                if (footerStatus) footerStatus.textContent = `🟢 Live Aktif • Meja: ${currentRoomCode}`;
+            } else if (state === 'connecting') {
+                dot.className = "w-2 h-2 rounded-full bg-amber-400 animate-pulse";
+                text.textContent = detailText || "Menghubungkan...";
+                text.className = "text-[11px] font-medium text-amber-300";
+                if (footerStatus) footerStatus.textContent = "⏳ Menghubungkan ke server live...";
+            } else {
+                dot.className = "w-2 h-2 rounded-full bg-rose-400";
+                text.textContent = detailText || "Mencoba ulang...";
+                text.className = "text-[11px] font-medium text-rose-300";
+            }
+        }
+
+        // Helper Toast
+        function showToast(msg) {
+            const container = document.getElementById('toastContainer');
+            const el = document.createElement('div');
+            el.className = "px-3.5 py-2 rounded-xl bg-emerald-900/95 border border-emerald-500/50 text-white text-xs font-semibold shadow-lg backdrop-blur-md transition-opacity duration-300 text-center";
+            el.textContent = msg;
+            container.appendChild(el);
+            setTimeout(() => {
+                el.style.opacity = '0';
+                setTimeout(() => el.remove(), 250);
+            }, 1800);
+        }
+
+        // Helper Modal Konfirmasi (Tanpa alert/confirm bawaan browser)
+        let confirmCallback = null;
+        function askConfirm(title, message, onOk) {
+            document.getElementById('confirmTitle').textContent = title;
+            document.getElementById('confirmMessage').textContent = message;
+            confirmCallback = onOk;
+            const modal = document.getElementById('modalConfirm');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+        function closeConfirm() {
+            const modal = document.getElementById('modalConfirm');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            confirmCallback = null;
+        }
+        document.getElementById('btnConfirmCancel').addEventListener('click', closeConfirm);
+        document.getElementById('btnConfirmOk').addEventListener('click', () => {
+            if (confirmCallback) confirmCallback();
+            closeConfirm();
+        });
+
+        // Topik MQTT untuk Meja tertentu
+        function getMqttStateTopic(code) {
+            return `${TOPIC_PREFIX}/state/${code}`;
+        }
+        function getMqttPingTopic(code) {
+            return `${TOPIC_PREFIX}/ping/${code}`;
+        }
+
+        // Inisialisasi MQTT WebSockets khusus untuk GitHub Pages (dilewati saat di dalam Canvas)
+        function initMqttRealtime() {
+            if (isCanvasEnv) {
+                return;
+            }
+            if (typeof window.mqtt === 'undefined') {
+                setConnectionStatus('error', 'Library sync gagal dimuat');
+                return;
+            }
+
+            if (mqttClient) {
+                try { mqttClient.end(true); } catch (e) {}
+            }
+
+            const brokerUrl = MQTT_BROKERS[currentBrokerIndex % MQTT_BROKERS.length];
+            setConnectionStatus('connecting', 'Menghubungkan Live...');
+
+            try {
+                mqttClient = window.mqtt.connect(brokerUrl, {
+                    clientId: 'billiard_' + clientDeviceId + '_' + Math.random().toString(16).substring(2, 6),
+                    clean: true,
+                    connectTimeout: 5000,
+                    reconnectPeriod: 2500
+                });
+            } catch (err) {
+                console.warn("WebSocket tidak diizinkan di lingkungan ini:", err);
+                return;
+            }
+
+            mqttClient.on('connect', () => {
+                setConnectionStatus('connected');
+                subscribeMqttRoom(currentRoomCode);
+            });
+
+            mqttClient.on('message', (topic, payloadBuffer) => {
+                try {
+                    const msg = JSON.parse(payloadBuffer.toString());
+                    const stateTopic = getMqttStateTopic(currentRoomCode);
+                    const pingTopic = getMqttPingTopic(currentRoomCode);
+
+                    if (topic === stateTopic && msg && Array.isArray(msg.players)) {
+                        // Terima data terbaru dari HP lain atau Retained Message
+                        const incomingTime = Number(msg.updatedAt) || 0;
+                        const localTime = Number(roomData.updatedAt) || 0;
+
+                        if (incomingTime >= localTime) {
+                            roomData = {
+                                roomCode: currentRoomCode,
+                                updatedAt: incomingTime,
+                                players: msg.players
+                            };
+                            renderPlayers();
+                        }
+                    } else if (topic === pingTopic && msg && msg.senderId !== clientDeviceId) {
+                        // Ada HP teman baru masuk meja, kirimkan state terbaru jika kita punya data
+                        if (roomData.updatedAt > 0 && mqttClient && mqttClient.connected) {
+                            mqttClient.publish(
+                                stateTopic,
+                                JSON.stringify({ ...roomData, senderId: clientDeviceId }),
+                                { qos: 1, retain: true }
+                            );
+                        }
+                    }
+                } catch (err) {
+                    console.error("MQTT parse error:", err);
+                }
+            });
+
+            mqttClient.on('error', () => {
+                currentBrokerIndex++;
+                if (currentBrokerIndex <= MQTT_BROKERS.length) {
+                    initMqttRealtime();
+                }
+            });
+
+            mqttClient.on('offline', () => {
+                setConnectionStatus('connecting', 'Menyambung ulang...');
+            });
+        }
+
+        function subscribeMqttRoom(code) {
+            if (!mqttClient || !mqttClient.connected) return;
+            const stateTopic = getMqttStateTopic(code);
+            const pingTopic = getMqttPingTopic(code);
+
+            mqttClient.subscribe([stateTopic, pingTopic], { qos: 1 }, (err) => {
+                if (!err) {
+                    setConnectionStatus('connected');
+                    // Minta sinkronisasi terbaru dari perangkat lain yang sedang aktif di meja ini
+                    mqttClient.publish(pingTopic, JSON.stringify({ senderId: clientDeviceId, ts: Date.now() }), { qos: 0, retain: false });
+                }
+            });
+        }
+
+        function publishMqttState() {
+            if (!mqttClient || !mqttClient.connected) return;
+            const stateTopic = getMqttStateTopic(currentRoomCode);
+            const payload = JSON.stringify({
+                roomCode: currentRoomCode,
+                updatedAt: roomData.updatedAt,
+                players: roomData.players,
+                senderId: clientDeviceId
+            });
+            mqttClient.publish(stateTopic, payload, { qos: 1, retain: true });
+        }
+
+        // Inisialisasi Aplikasi (Mendukung GitHub Pages via MQTT + Canvas via Firebase)
+        async function startApp() {
+            const hashCode = window.location.hash.replace('#', '').trim().toUpperCase();
+            if (hashCode && hashCode.length >= 2 && hashCode.length <= 15) {
+                currentRoomCode = hashCode.replace(/[^A-Z0-9-_]/g, '') || "BEDDUL";
+                roomData.roomCode = currentRoomCode;
+            } else {
+                window.location.hash = currentRoomCode;
+            }
+
+            document.getElementById('footerUserId').textContent = clientDeviceId;
+            renderPlayers();
+
+            // 1. Jika di GitHub Pages (bukan Canvas), gunakan MQTT WebSockets Realtime
+            if (!isCanvasEnv) {
+                initMqttRealtime();
+            }
+
+            // 2. Jika di dalam Canvas, gunakan Firebase Firestore Realtime
+            try {
+                if (isCanvasEnv) {
+                    const config = JSON.parse(__firebase_config);
+                    const app = initializeApp(config);
+                    auth = getAuth(app);
+                    db = getFirestore(app);
+
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+
+                    currentUser = auth.currentUser;
+                    onAuthStateChanged(auth, (u) => {
+                        currentUser = u;
+                        if (u) document.getElementById('footerUserId').textContent = u.uid;
+                    });
+                    if (currentUser) document.getElementById('footerUserId').textContent = currentUser.uid;
+                }
+            } catch (e) {
+                console.warn("Firebase gagal diinisialisasi:", e);
+            }
+
+            await connectToRoom(currentRoomCode);
+        }
+
+        function getRoomRef(code) {
+            return doc(db, 'artifacts', appId, 'public', 'data', 'billiard_rooms', code);
+        }
+
+        async function connectToRoom(rawCode) {
+            const cleanCode = rawCode.trim().toUpperCase().replace(/[^A-Z0-9-_]/g, '') || "BEDDUL";
+            const isSwitchingRoom = cleanCode !== currentRoomCode;
+
+            if (isSwitchingRoom && mqttClient && mqttClient.connected) {
+                mqttClient.unsubscribe([getMqttStateTopic(currentRoomCode), getMqttPingTopic(currentRoomCode)]);
+            }
+
+            currentRoomCode = cleanCode;
+            window.location.hash = cleanCode;
+            document.getElementById('badgeRoomCode').textContent = cleanCode;
+            const footerRoomLabel = document.getElementById('footerRoomLabel');
+            if (footerRoomLabel) footerRoomLabel.textContent = cleanCode;
+
+            if (isSwitchingRoom) {
+                // Reset timestamp lokal agar langsung menerima data dari meja yang baru dimasuki
+                roomData = {
+                    roomCode: cleanCode,
+                    updatedAt: 0,
+                    players: [
+                        { id: "p_1", name: "Andi", wins: 0, createdAt: 1 },
+                        { id: "p_2", name: "Budi", wins: 0, createdAt: 2 }
+                    ]
+                };
+                renderPlayers();
+            }
+
+            // Subscribe via MQTT
+            subscribeMqttRoom(cleanCode);
+
+            // Jika Firebase tersedia di Canvas, sinkronkan juga
+            if (!db || !currentUser) return;
+
+            if (unsubscribeRoom) {
+                unsubscribeRoom();
+                unsubscribeRoom = null;
+            }
+
+            const ref = getRoomRef(cleanCode);
+            try {
+                const snap = await getDoc(ref);
+                if (!snap.exists()) {
+                    await setDoc(ref, {
+                        roomCode: cleanCode,
+                        updatedAt: Date.now(),
+                        players: roomData.players
+                    });
+                }
+
+                unsubscribeRoom = onSnapshot(
+                    ref,
+                    (docSnap) => {
+                        setConnectionStatus('connected');
+                        if (docSnap.exists()) {
+                            const data = docSnap.data();
+                            const incomingTime = Number(data.updatedAt) || 0;
+                            if (incomingTime >= (Number(roomData.updatedAt) || 0)) {
+                                roomData = {
+                                    roomCode: data.roomCode || cleanCode,
+                                    updatedAt: incomingTime,
+                                    players: Array.isArray(data.players) ? data.players : []
+                                };
+                                renderPlayers();
+                            }
+                        }
+                    },
+                    (err) => {
+                        console.error("Firestore sync error:", err);
+                        setConnectionStatus('error', 'Gangguan koneksi');
+                    }
+                );
+            } catch (err) {
+                console.error("Room error:", err);
+            }
+        }
+
+        async function saveRoomData(updatedPlayers) {
+            roomData = {
+                roomCode: currentRoomCode,
+                players: updatedPlayers,
+                updatedAt: Date.now()
+            };
+            renderPlayers();
+
+            // 1. Kirim instan lewat MQTT (Retained) agar semua HP di GitHub Pages langsung berubah
+            publishMqttState();
+
+            // 2. Simpan juga ke Firestore jika aktif
+            if (!db || !currentUser) return;
+            try {
+                await setDoc(getRoomRef(currentRoomCode), roomData, { merge: true });
+            } catch (err) {
+                console.error("Save error:", err);
+            }
+        }
+
+        // Fungsi Tambah Pemain
+        async function addPlayer(name) {
+            const clean = name.trim();
+            if (!clean) return;
+
+            const newPlayer = {
+                id: "p_" + Date.now() + "_" + Math.random().toString(36).substring(2, 6),
+                name: clean,
+                wins: 0,
+                createdAt: Date.now()
+            };
+
+            await saveRoomData([...roomData.players, newPlayer]);
+            showToast(`"${clean}" ditambahkan`);
+        }
+
+        // Fungsi Ubah Skor (+1 atau -1)
+        async function changeScore(playerId, delta) {
+            const updated = roomData.players.map(p => {
+                if (p.id === playerId) {
+                    const nextWins = Math.max(0, (Number(p.wins) || 0) + delta);
+                    return { ...p, wins: nextWins };
+                }
+                return p;
+            });
+            await saveRoomData(updated);
+        }
+
+        // Fungsi Hapus Pemain
+        function removePlayer(playerId) {
+            const target = roomData.players.find(p => p.id === playerId);
+            if (!target) return;
+
+            askConfirm(
+                `Hapus ${target.name}?`,
+                `Nama dan skor ${target.name} akan dihapus dari daftar meja ini.`,
+                async () => {
+                    const updated = roomData.players.filter(p => p.id !== playerId);
+                    await saveRoomData(updated);
+                    showToast(`${target.name} dihapus`);
+                }
+            );
+        }
+
+        // Render Daftar Skor Pemain (Kartu 2 Baris: Nama Utuh & Jelas, Tidak Terpotong)
+        function renderPlayers() {
+            document.getElementById('badgeRoomCode').textContent = currentRoomCode;
+            const footerRoomLabel = document.getElementById('footerRoomLabel');
+            if (footerRoomLabel) footerRoomLabel.textContent = currentRoomCode;
+            document.getElementById('sortStatusLabel').textContent = `Urutkan Skor Tertinggi: ${sortByHighest ? 'ON' : 'OFF'}`;
+
+            const container = document.getElementById('playersListContainer');
+            const list = [...(roomData.players || [])];
+
+            if (list.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-10 bg-emerald-950/30 border border-dashed border-emerald-800/60 rounded-2xl">
+                        <p class="text-sm text-emerald-200/70">Belum ada pemain di meja ini.</p>
+                        <p class="text-xs text-emerald-400/50 mt-1">Ketik nama pemain di atas lalu tekan + Tambah.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            // Cari skor tertinggi untuk memberi tanda piala
+            const maxScore = Math.max(...list.map(p => Number(p.wins) || 0));
+
+            if (sortByHighest) {
+                list.sort((a, b) => (Number(b.wins) || 0) - (Number(a.wins) || 0) || (a.createdAt || 0) - (b.createdAt || 0));
+            } else {
+                list.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+            }
+
+            container.innerHTML = list.map((player, idx) => {
+                const score = Number(player.wins) || 0;
+                const isLeader = maxScore > 0 && score === maxScore;
+
+                const cardStyle = isLeader
+                    ? "bg-emerald-900/65 border-amber-400/70 shadow-lg"
+                    : "bg-emerald-950/75 border-emerald-800/70";
+
+                const rankBadge = isLeader
+                    ? `<div class="w-8 h-8 rounded-xl bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center shrink-0 shadow"><i class="fa-solid fa-trophy"></i></div>`
+                    : `<div class="w-8 h-8 rounded-xl bg-emerald-900 text-emerald-300 font-mono font-bold text-xs flex items-center justify-center shrink-0 border border-emerald-700/50">${idx + 1}</div>`;
+
+                return `
+                    <div class="rounded-2xl border ${cardStyle} p-3.5 space-y-3 transition">
+                        <!-- BARIS ATAS: Nomor/Piala + Nama Pemain Utuh & Jelas + Tombol Hapus -->
+                        <div class="flex items-start justify-between gap-2.5">
+                            <div class="flex items-center gap-2.5 min-w-0 flex-1">
+                                ${rankBadge}
+                                <div class="min-w-0 flex-1">
+                                    <div class="font-bold text-lg text-white break-words leading-snug">${player.name}</div>
+                                    ${isLeader ? `<span class="inline-block text-[10px] font-extrabold uppercase tracking-wider text-amber-400 mt-0.5">👑 Memimpin Skor</span>` : ''}
+                                </div>
+                            </div>
+
+                            <button
+                                type="button"
+                                data-action="delete"
+                                data-id="${player.id}"
+                                class="touch-btn w-8 h-8 rounded-lg bg-emerald-950/80 hover:bg-rose-950/80 text-emerald-400/60 hover:text-rose-400 flex items-center justify-center transition shrink-0"
+                                title="Hapus ${player.name}"
+                            >
+                                <i class="fa-regular fa-trash-can text-xs"></i>
+                            </button>
+                        </div>
+
+                        <!-- BARIS BAWAH: Kontrol Skor Lega ([-], Angka Skor Besar, [+1 Menang]) -->
+                        <div class="flex items-center justify-between gap-3 bg-[#05120e]/70 rounded-xl p-2 border border-emerald-800/40">
+                            <button
+                                type="button"
+                                data-action="minus"
+                                data-id="${player.id}"
+                                class="touch-btn w-12 h-11 rounded-xl bg-emerald-900/90 hover:bg-emerald-800 border border-emerald-700/60 text-white font-bold text-lg flex items-center justify-center transition shrink-0"
+                                title="Kurangi 1"
+                            >
+                                <i class="fa-solid fa-minus text-sm"></i>
+                            </button>
+
+                            <div class="flex-1 text-center">
+                                <span class="block text-[10px] uppercase tracking-wider text-emerald-400/60 font-semibold leading-none mb-0.5">Menang</span>
+                                <span class="font-mono font-extrabold text-3xl ${isLeader ? 'text-amber-400' : 'text-white'} leading-none">${score}</span>
+                            </div>
+
+                            <button
+                                type="button"
+                                data-action="plus"
+                                data-id="${player.id}"
+                                class="touch-btn h-11 px-5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-sm sm:text-base flex items-center justify-center gap-1.5 shadow-md transition shrink-0"
+                                title="Tambah 1 Menang"
+                            >
+                                <i class="fa-solid fa-plus text-xs"></i>
+                                <span>1 Menang</span>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Event Listeners
+        document.getElementById('formAddPlayer').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const input = document.getElementById('inputPlayerName');
+            addPlayer(input.value);
+            input.value = '';
+        });
+
+        document.getElementById('playersListContainer').addEventListener('click', (e) => {
+            const btn = e.target.closest('button[data-action]');
+            if (!btn) return;
+            const id = btn.dataset.id;
+            const action = btn.dataset.action;
+
+            if (action === 'plus') changeScore(id, 1);
+            if (action === 'minus') changeScore(id, -1);
+            if (action === 'delete') removePlayer(id);
+        });
+
+        document.getElementById('btnToggleSort').addEventListener('click', () => {
+            sortByHighest = !sortByHighest;
+            renderPlayers();
+        });
+
+        document.getElementById('btnResetAllScores').addEventListener('click', () => {
+            askConfirm(
+                "Reset Semua Skor ke 0?",
+                "Nama pemain tetap ada, tetapi semua angka skor akan kembali menjadi 0.",
+                async () => {
+                    const resetList = (roomData.players || []).map(p => ({ ...p, wins: 0 }));
+                    await saveRoomData(resetList);
+                    showToast("Semua skor di-reset ke 0");
+                }
+            );
+        });
+
+        // Modal Kode Meja
+        const modalRoom = document.getElementById('modalRoom');
+        document.getElementById('btnOpenRoomModal').addEventListener('click', () => {
+            document.getElementById('inputRoomCode').value = currentRoomCode;
+            modalRoom.classList.remove('hidden');
+            modalRoom.classList.add('flex');
+            setTimeout(() => document.getElementById('inputRoomCode').select(), 50);
+        });
+        document.getElementById('btnCloseRoomModal').addEventListener('click', () => {
+            modalRoom.classList.add('hidden');
+            modalRoom.classList.remove('flex');
+        });
+        document.getElementById('formChangeRoom').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const code = document.getElementById('inputRoomCode').value;
+            modalRoom.classList.add('hidden');
+            modalRoom.classList.remove('flex');
+            await connectToRoom(code);
+            showToast(`Terhubung ke Meja: ${currentRoomCode}`);
+        });
+
+        // Salin Link & Kode Meja
+        document.getElementById('btnCopyRoom').addEventListener('click', () => {
+            const shareUrl = `${window.location.origin}${window.location.pathname}#${currentRoomCode}`;
+            const textarea = document.createElement('textarea');
+            textarea.value = shareUrl;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            try {
+                document.execCommand('copy');
+                showToast(`Link Meja #${currentRoomCode} disalin!`);
+            } catch (err) {}
+            document.body.removeChild(textarea);
+        });
+
+        // Tombol Refresh Sync Manual
+        document.getElementById('btnForceSync').addEventListener('click', async () => {
+            if (isCanvasEnv) {
+                await connectToRoom(currentRoomCode);
+                showToast(`Sinkronisasi Meja #${currentRoomCode} diperbarui!`);
+            } else if (mqttClient && mqttClient.connected) {
+                subscribeMqttRoom(currentRoomCode);
+                if (roomData.updatedAt > 0) {
+                    publishMqttState();
+                }
+                showToast(`Sinkronisasi Meja #${currentRoomCode} diperbarui!`);
+            } else {
+                initMqttRealtime();
+                showToast("Menghubungkan ulang ke server live...");
+            }
+        });
+
+        // Pantau perubahan hash URL jika pengguna mengganti #KODEMEJA langsung di address bar
+        window.addEventListener('hashchange', () => {
+            const newHash = window.location.hash.replace('#', '').trim().toUpperCase();
+            if (newHash && newHash !== currentRoomCode) {
+                connectToRoom(newHash);
+            }
+        });
+
+        // Modal Install & Layar Penuh
+        const modalInstall = document.getElementById('modalInstall');
+        document.getElementById('btnOpenInstallModal').addEventListener('click', () => {
+            modalInstall.classList.remove('hidden');
+            modalInstall.classList.add('flex');
+        });
+        document.getElementById('btnCloseInstallModal').addEventListener('click', () => {
+            modalInstall.classList.add('hidden');
+            modalInstall.classList.remove('flex');
+        });
+        document.getElementById('btnFullscreen').addEventListener('click', () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(() => {});
+            } else {
+                document.exitFullscreen();
+            }
+            modalInstall.classList.add('hidden');
+            modalInstall.classList.remove('flex');
+        });
+
+        let deferredPrompt = null;
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            const btn = document.getElementById('btnNativeInstall');
+            btn.classList.remove('hidden');
+            btn.classList.add('flex');
+        });
+        document.getElementById('btnNativeInstall').addEventListener('click', async () => {
+            if (!deferredPrompt) return;
+            deferredPrompt.prompt();
+            await deferredPrompt.userChoice;
+            deferredPrompt = null;
+        });
+
+        window.addEventListener('DOMContentLoaded', startApp);
+    </script>
+</body>
+</html>
